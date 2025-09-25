@@ -1,0 +1,97 @@
+# Copyright © SambaNova Systems, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+    - _self_
+    - override hydra/hydra_logging: disabled
+    - override hydra/job_logging: disabled
+
+hydra:
+  searchpath:
+    - pkg://sambanova_modelzoo/libs/nlp/args
+    - sambanova_modelzoo/libs/nlp/args
+  output_subdir: null
+  run:
+    dir: ${oc.env:OUTPUT_FOLDER, "."}
+
+# Model configs, changes here is effective only if the PEF is compiled/re-compiled.
+model:
+    # Whether to have layernorm in float32 precision, instead of bfloat16.
+    fp32_ln: False
+    # Whether to have logits in float32 precision to be consumed by token sampling.
+    fp32_logits: True
+    # Whether to have skip connection in float32 precision.
+    fp32_skip_add: True
+    # Whether to have Attention in float32/bfloat16 mixed precision.
+    mixedp_attn: True
+    # The max sequence length to compile a static graph.
+    max_seq_length: 4096
+
+
+generation:
+    # Gives you the option to modify generation properties for the .generate call from a model,
+    # e.g. use top_k see huggingface docs
+    generation_strategy: {}
+    # The batch size to compile a static graph.
+    batch_size: 1
+    # the checkpoint or model config file
+    model_name_or_path: null
+
+# A string of either compile or run.
+command: null
+
+# Compiler configs for PEF optimization and generation.
+# NOTE: only need to change arch/output_folder and keep the others as default.
+samba_compile:
+    # RDU architecture to compile to, e.g. sn20/sn30/sn40.
+    arch: sn40
+    # Output folder for the PEF and other artifacts.
+    output_folder: ${oc.env:OUTPUT_FOLDER, "/import/snvm-sc-scratch1/${oc.env:USER}/demo/labs/lab7"}
+    # Name of the PEF
+    pef_name: null
+    # Whether to compile inference graph only. It should be always True for text generaton tasks.
+    inference: True
+    # Optimization level, o1 fuses adjacent operators for better performance.
+    optim_level: o0
+    # A legacy flag for O1 optimization.
+    o1_experimental_opts: True
+    # An optional path to specify the O1 pattern fusion and heuristis in predefined yaml file format.
+    use_o1_default_rules: False
+    # Compiler optimization mode. Specify `nlp` to optimize models based on a transformers architecture. No other options are currently supported.
+    compiler_mode: nlp
+    # The SambaFlow compiler performs bfloat16 computation by default.
+    # This flag forces operators to be in float32/bfloat16 mixed precision.
+    # See https://docs.sambanova.ai/developer/latest/mixed-precision.html for background information.
+    enable_mixed_precision_ops:
+        - gemm
+        - softmax
+    # Accumulation mode for tiling, bf16sr means bf16 inputs with stochastic rounding.
+    tiling_accum: fp32
+    # Number of tiles to be used on chip. If you don't set num_tiles=4 on an SN30 system,
+    # the compiler uses tensor parallel mode, which is not currently supported with Model Zoo.
+    num_tiles: 4
+    # Number of chips to be used for the compilation.
+    n_chips: 1
+    # HBM/DRAM auto allocation algorithm. See sambaflow.samba.argconf.dev_args.CompileDevArgs for details
+    hbm_auto_alloc: linear_scan
+    # compile for CoE runtime API
+    enable_coe: True
+    loop_conversion: True
+    enable_off_chip_scatter_duplication: True
+    run_early_tp: True
+
+# Run configs
+samba_run:
+    # The path to the compiled PEF file.
+    pef: null
