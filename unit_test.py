@@ -142,7 +142,7 @@ def test_model_init():
 def test_simple_e2e():
     torch.use_deterministic_algorithms(True)
     set_seed(256)
-    config = Glm4MoeConfig(num_hidden_layers=2,
+    config = Glm4MoeConfig(num_hidden_layers=5,
                            max_seq_length=256,
                            hidden_size=192,
                            vocab_size=1024,
@@ -170,8 +170,8 @@ def test_simple_e2e():
     sn_model = SNGlm4MoeForCausalLM(sn_config)
     sn_model.eval()
 
-    # sn_state_dict = checkpoint_conversion(state_dict, config)
-    sn_state_dict = state_dict
+    sn_state_dict = checkpoint_conversion(state_dict, config)
+    # sn_state_dict = state_dict
 
     sn_model.load_state_dict(sn_state_dict)
     sn_out = sn_model(ipts)
