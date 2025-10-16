@@ -43,7 +43,10 @@ from sambanova_modelzoo.patch_router import sn_patch_replace, sn_patch_post_proc
 
 from sambanova_modelzoo.modeling_utils import sn_patch_module_add_config
 from sambanova_modelzoo.generation.clm_runtime import CausalLMGenerationMixin
-from .patch_glm4_moe import SNGlm4MoeForCausalLMPatch, Glm4MoePreTrainedModelPatch, SNGlm4MoeModelPatch, Glm4MoeDecoderLayerPatch, Glm4MoeExperts, Glm4MoeMoEPatch, Glm4MoeTopkRouterPatch 
+from .patch_glm4_moe import SNGlm4MoeForCausalLMPatch, Glm4MoePreTrainedModelPatch, SNGlm4MoeModelPatch, Glm4MoeDecoderLayerPatch, Glm4MoeExperts, Glm4MoeMoEPatch, Glm4MoeTopkRouterPatch, sn_patch_module_add_hyperfunction 
+
+from sambanova_modelzoo.modules.sparse_moe import SNTopkRouterDeepseekV3Like
+from sambanova_modelzoo.modules.mlp import SNMLPLlamaLike_forward
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -219,7 +222,7 @@ class Glm4MoeMLP(nn.Module):
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
-
+    @sn_patch_replace(patch=SNMLPLlamaLike_forward)
     def forward(self, x):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return down_proj
@@ -260,6 +263,7 @@ class Glm4MoeTopkRouter(nn.Module):
         topk_indices = torch.topk(scores_for_choice, k=self.top_k, dim=-1, sorted=False)[1]
         return topk_indices
 
+    @sn_patch_replace(patch=SNTopkRouterDeepseekV3Like.apply_forward)
     def forward(self, hidden_states):
         hidden_states = hidden_states.view(-1, self.config.hidden_size)
         router_logits = F.linear(hidden_states.type(torch.float32), self.weight.type(torch.float32))
@@ -298,7 +302,7 @@ class Glm4MoeMoE(nn.Module):
     """
     A mixed expert module containing shared experts.
     """
-
+    @sn_patch_post_process_self(modification=Glm4MoeMoEPatch.patch__init__)
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -339,6 +343,7 @@ class Glm4MoeMoE(nn.Module):
         # and all expert are "local" meaning we shard but we don't gather
         return final_hidden_states.type(hidden_states.dtype)
 
+    @sn_patch_replace(patch=Glm4MoeMoEPatch.patch_forward)
     def forward(self, hidden_states):
         residuals = hidden_states
         orig_shape = hidden_states.shape
@@ -350,7 +355,8 @@ class Glm4MoeMoE(nn.Module):
 
 
 class Glm4MoeDecoderLayer(GradientCheckpointingLayer):
- #   @sn_patch_post_process_self(modification = Glm4MoeDecoderLayerPatch.patch__init__)
+    @sn_patch_post_process_self(modification = Glm4MoeDecoderLayerPatch.patch__init__)
+    @sn_patch_post_process_self(modification = sn_patch_module_add_config)
     def __init__(self, config: SNGlm4MoeConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -365,6 +371,7 @@ class Glm4MoeDecoderLayer(GradientCheckpointingLayer):
         self.input_layernorm = Glm4MoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = Glm4MoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+    @sn_patch_replace(patch = Glm4MoeDecoderLayerPatch.forward)
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -462,6 +469,7 @@ class SNGlm4MoeModel(Glm4MoePreTrainedModel):
     
     @sn_patch_post_process_self(modification = SNGlm4MoeModelPatch.patch__init__)
     @sn_patch_post_process_self(modification = sn_patch_module_add_config)
+    @sn_patch_post_process_self(modification = sn_patch_module_add_hyperfunction)
     def __init__(self, config: SNGlm4MoeConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
@@ -480,6 +488,7 @@ class SNGlm4MoeModel(Glm4MoePreTrainedModel):
 
     @check_model_inputs
     @auto_docstring
+    @sn_patch_replace(patch = SNGlm4MoeModelPatch.forward)
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -547,6 +556,7 @@ class SNGlm4MoeForCausalLM(Glm4MoePreTrainedModel, CausalLMGenerationMixin):
 
     @sn_patch_post_process_self(modification = sn_patch_module_add_config)
     @sn_patch_post_process_self(modification = SNGlm4MoeForCausalLMPatch.patch_init)
+    @sn_patch_post_process_self(modification=sn_patch_module_add_hyperfunction)
     def __init__(self, config):
         #super().__init__(config)
         Glm4MoePreTrainedModel.__init__(self, config)
@@ -566,6 +576,7 @@ class SNGlm4MoeForCausalLM(Glm4MoePreTrainedModel, CausalLMGenerationMixin):
 
     @can_return_tuple
     @auto_docstring
+    @sn_patch_replace(patch=SNGlm4MoeForCausalLMPatch.forward)
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
